@@ -1,6 +1,16 @@
 local utils = require("unity.utils")
 local config = require("unity.config")
 
+local function xml_escape_attr(value)
+  if not value then return "" end
+  value = value:gsub("&", "&amp;")
+  value = value:gsub("<", "&lt;")
+  value = value:gsub(">", "&gt;")
+  value = value:gsub('"', "&quot;")
+  value = value:gsub("'", "&apos;")
+  return value
+end
+
 local XmlCsprojHandler = {}
 XmlCsprojHandler.__index = XmlCsprojHandler
 
@@ -90,33 +100,30 @@ function XmlCsprojHandler:checkProjectCapability(attribute)
 	return false
 end
 
--- Função para adicionar uma nova Compile tag
 function XmlCsprojHandler:addCompileTag(value)
-	-- Protege o valor para uso em pattern
-	local escapedValue = value:gsub("([%.%+%-%*%?%^%$%(%)%[%]%%])", "%%%1")
-	local existingPattern = "<Compile%s+Include%s*=%s*[\"']" .. escapedValue .. "[\"']%s*/?>"
+  local encoded = xml_escape_attr(value)
 
-	-- Evita duplicação
-	if self.content:match(existingPattern) then
-		return false, "[NvimUnity] Script already added in Unity project"
-	end
+  local patternValue = encoded:gsub("([%.%+%-%*%?%^%$%(%)%[%]%%])", "%%%1")
+  local existingPattern = "<Compile%s+Include%s*=%s*[\"']" .. patternValue .. "[\"']%s*/?>"
 
-	-- Se placeholder existe, insere nele
-	local placeholderPattern = "<!%-%- {{COMPILE_INCLUDES}} %-%->"
-	if self.content:match(placeholderPattern) then
-		local newLine = '    <Compile Include="' .. value .. '" />\n    <!-- {{COMPILE_INCLUDES}} -->'
-		self.content = self.content:gsub(placeholderPattern, newLine, 1)
-		return true, "[NvimUnity] Script added to Unity project"
-	end
+  if self.content:match(existingPattern) then
+    return false, "[NvimUnity] Script already added in Unity project"
+  end
 
-	-- Se não existe placeholder, adiciona bloco novo com placeholder e tag
-	local newItemGroup = "  <ItemGroup>\n"
-		.. "<!-- Auto-generated block: do not modify manually or remove these commented lines -->\n"
-		.. "<!-- {{COMPILE_INCLUDES}} -->\n"
-		.. '    <Compile Include="'
-		.. value
-		.. '" />\n'
-		.. "  </ItemGroup>"
+  local placeholderPattern = "<!%-%- {{COMPILE_INCLUDES}} %-%->"
+  if self.content:match(placeholderPattern) then
+    local newLine = '    <Compile Include="' .. encoded .. '" />\n    <!-- {{COMPILE_INCLUDES}} -->'
+    self.content = self.content:gsub(placeholderPattern, newLine, 1)
+    return true, "[NvimUnity] Script added to Unity project"
+  end
+
+  local newItemGroup = "  <ItemGroup>\n"
+    .. "<!-- Auto-generated block: do not modify manually or remove these commented lines -->\n"
+    .. "<!-- {{COMPILE_INCLUDES}} -->\n"
+    .. '    <Compile Include="'
+    .. encoded
+    .. '" />\n'
+    .. "  </ItemGroup>"
 
 	-- Extrai a tag <Project>
 	local openTag, innerContent, closeTag = self.content:match("(<Project.-\n)(.-)(</Project>)")
@@ -273,8 +280,9 @@ function XmlCsprojHandler:resetCompileTags()
 	-- Criar novo bloco <Compile />
 	local newCompileTags = {}
 	for _, file in ipairs(files) do
-		local cutFile = utils.cutPath(utils.uriToPath(file), "Assets")
-		table.insert(newCompileTags, '    <Compile Include="' .. cutFile .. '" />')
+	  local cutFile = utils.cutPath(utils.uriToPath(file), "Assets")
+	  local encoded = xml_escape_attr(cutFile)
+	  table.insert(newCompileTags, '    <Compile Include="' .. encoded .. '" />')
 	end
 	local newBlock = table.concat(newCompileTags, "\n")
 	-- Procurar placeholder
